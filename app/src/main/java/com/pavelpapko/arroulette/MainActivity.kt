@@ -16,6 +16,10 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.core.content.ContextCompat
 import com.google.ar.core.Anchor
 import com.google.ar.core.Camera
@@ -45,7 +49,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var unitButton: Button
     private lateinit var historyButton: Button
 
-    private var arSceneView: ARSceneView? = null
+    private var arComposeView: ComposeView? = null
     private var latestFrame: Frame? = null
     private var firstAnchor: Anchor? = null
     private var secondAnchor: Anchor? = null
@@ -106,58 +110,63 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun initializeArScene() {
-        if (arSceneView != null || isFinishing || isDestroyed) return
+        if (arComposeView != null || isFinishing || isDestroyed) return
 
-        val sceneView = ARSceneView(
-            context = this,
-            sharedActivity = this,
-            sharedLifecycle = lifecycle
-        ).apply {
+        val composeView = ComposeView(this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
-            planeRenderer.isEnabled = true
-            planeRenderer.isVisible = true
-            planeRenderer.isShadowReceiver = false
-            sessionConfiguration = { session, config ->
-                config.planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
-                config.lightEstimationMode = Config.LightEstimationMode.AMBIENT_INTENSITY
-                config.instantPlacementMode = Config.InstantPlacementMode.DISABLED
-                depthSupported = session.isDepthModeSupported(Config.DepthMode.AUTOMATIC)
-                config.depthMode = if (depthSupported) {
-                    Config.DepthMode.AUTOMATIC
-                } else {
-                    Config.DepthMode.DISABLED
-                }
-            }
-            onSessionCreated = { session ->
-                depthSupported = session.isDepthModeSupported(Config.DepthMode.AUTOMATIC)
-                runOnUiThread { updateStatusText(TrackingState.PAUSED) }
-            }
-            onSessionUpdated = { _, frame ->
-                latestFrame = frame
-                updateFrameUi(frame)
-            }
-            onSessionFailed = { exception ->
-                runOnUiThread {
-                    statusText.text = "ARCore недоступен"
-                    AlertDialog.Builder(this@MainActivity)
-                        .setTitle("Не удалось запустить AR")
-                        .setMessage(exception.localizedMessage ?: "Проверьте поддержку ARCore и наличие Google Play Services for AR.")
-                        .setPositiveButton(android.R.string.ok, null)
-                        .show()
-                }
+            setViewCompositionStrategy(
+                ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed
+            )
+            setContent {
+                ARSceneView(
+                    modifier = Modifier.fillMaxSize(),
+                    planeRenderer = true,
+                    sessionConfiguration = { session, config ->
+                        config.planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
+                        config.lightEstimationMode = Config.LightEstimationMode.AMBIENT_INTENSITY
+                        config.instantPlacementMode = Config.InstantPlacementMode.DISABLED
+                        depthSupported = session.isDepthModeSupported(Config.DepthMode.AUTOMATIC)
+                        config.depthMode = if (depthSupported) {
+                            Config.DepthMode.AUTOMATIC
+                        } else {
+                            Config.DepthMode.DISABLED
+                        }
+                    },
+                    onSessionCreated = { session ->
+                        depthSupported = session.isDepthModeSupported(Config.DepthMode.AUTOMATIC)
+                        runOnUiThread { updateStatusText(TrackingState.PAUSED) }
+                    },
+                    onSessionUpdated = { _, frame ->
+                        latestFrame = frame
+                        updateFrameUi(frame)
+                    },
+                    onSessionFailed = { exception ->
+                        runOnUiThread {
+                            statusText.text = "ARCore недоступен"
+                            AlertDialog.Builder(this@MainActivity)
+                                .setTitle("Не удалось запустить AR")
+                                .setMessage(
+                                    exception.localizedMessage
+                                        ?: "Проверьте поддержку ARCore и наличие Google Play Services for AR."
+                                )
+                                .setPositiveButton(android.R.string.ok, null)
+                                .show()
+                        }
+                    }
+                )
             }
         }
 
-        arSceneView = sceneView
-        arContainer.addView(sceneView, 0)
+        arComposeView = composeView
+        arContainer.addView(composeView, 0)
     }
 
     private fun placePoint() {
         val frame = latestFrame
-        val sceneView = arSceneView
+        val sceneView = arComposeView
         if (frame == null || sceneView == null || frame.camera.trackingState != TrackingState.TRACKING) {
             toast("Подождите, пока камера определит пространство")
             return
@@ -210,7 +219,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateFrameUi(frame: Frame) {
-        val sceneView = arSceneView ?: return
+        val sceneView = arComposeView ?: return
         val camera = frame.camera
         val hit = if (camera.trackingState == TrackingState.TRACKING && sceneView.width > 0 && sceneView.height > 0) {
             findBestHit(frame, sceneView.width / 2f, sceneView.height / 2f)
@@ -384,7 +393,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         detachAnchors()
-        arSceneView = null
+        arComposeView?.disposeComposition()
+        arComposeView = null
         super.onDestroy()
     }
 
