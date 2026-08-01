@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.3 — 2026-08-01
+
+- Исправлена ошибка Android Lint `NewApi` для Android 10–14: `MutableList.removeLast()` заменён на совместимый `removeAt(lastIndex)`.
+- GitHub Actions теперь сохраняет HTML и текстовый отчёты lint как артефакт даже при неуспешной проверке.
+- Версия приложения повышена до 1.0.3 (`versionCode` 4).
+
 ## 1.0.2 — 2026-08-01
 
 - Исправлен конфликт слияния AndroidManifest между приложением и SceneView: значение `com.google.ar.core=required` теперь явно имеет приоритет через `tools:replace="android:value"`.

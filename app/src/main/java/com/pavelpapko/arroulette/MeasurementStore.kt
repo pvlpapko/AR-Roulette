@@ -29,7 +29,7 @@ class MeasurementStore(context: Context) {
     fun add(record: MeasurementRecord) {
         val records = load()
         records.add(0, record)
-        while (records.size > MAX_HISTORY_ITEMS) records.removeLast()
+        while (records.size > MAX_HISTORY_ITEMS) records.removeAt(records.lastIndex)
         save(records)
     }
 
