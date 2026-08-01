@@ -38,7 +38,7 @@ class MeasurementOverlayView @JvmOverloads constructor(
     }
     private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
-        textSize = 16f * resources.displayMetrics.scaledDensity
+        textSize = resources.getDimension(R.dimen.measurement_label_text_size)
         textAlign = Paint.Align.CENTER
         typeface = android.graphics.Typeface.DEFAULT_BOLD
     }

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.5 — 2026-08-01
+
+- Исправлена release-сборка R8: удалено слишком широкое правило `-keep class io.github.sceneview.**`, которое принудительно сохраняло необязательный `NearbyCollaborativeTransport` и вызывало ошибки отсутствующих классов Google Play services Nearby.
+- Kotlin и Compose Compiler приведены к версии 2.3.20, используемой SceneView 4.25.0 и поддерживаемой R8 в Android Gradle Plugin 8.13.2.
+- Устранено предупреждение об устаревшем `DisplayMetrics.scaledDensity`: размер текста перенесён в ресурс `16sp`.
+- Версия приложения повышена до 1.0.5 (`versionCode` 6).
+
 ## 1.0.4 — 2026-08-01
 
 - Исправлена ошибка Android Lint `PermissionImpliesUnsupportedChromeOsHardware`.
@@ -23,7 +30,7 @@
 
 - Исправлена сборка с Kotlin 2.3.20: устаревший `android.kotlinOptions.jvmTarget` заменён на `kotlin.compilerOptions`.
 - JVM target сохранён на Java 17.
-- Kotlin обновлён до 2.4.10 в соответствии с зависимостями SceneView 4.25.0.
+- На этом этапе Kotlin был обновлён до 2.4.10; в версии 1.0.5 он скорректирован до совместимой 2.3.20.
 - `ARSceneView` переведён на актуальный Compose API и встроен в существующий XML-интерфейс через `ComposeView`.
 
 ## 1.0.0 — 2026-08-01
