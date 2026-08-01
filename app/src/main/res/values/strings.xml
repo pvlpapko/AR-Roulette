@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">AR Рулетка</string>
+    <string name="camera_permission_title">Нужен доступ к камере</string>
+    <string name="camera_permission_message">Камера необходима для определения реальных точек пространства и измерения расстояния.</string>
+    <string name="grant_permission">Разрешить</string>
+    <string name="close">Закрыть</string>
+    <string name="point_one">Поставить точку 1</string>
+    <string name="point_two">Поставить точку 2</string>
+    <string name="new_measurement">Новое измерение</string>
+    <string name="undo">Отменить</string>
+    <string name="clear">Очистить</string>
+    <string name="history">История</string>
+    <string name="unit">Единицы</string>
+</resources>
