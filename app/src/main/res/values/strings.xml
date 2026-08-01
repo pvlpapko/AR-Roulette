@@ -10,7 +10,7 @@
     <string name="point_one">Точка 1</string>
     <string name="point_two">Точка 2</string>
     <string name="new_measurement">Новое измерение</string>
-    <string name="area_point_button">Точка %1$d из %2$d</string>
+    <string name="area_point_button">Точка %1$s из %2$s</string>
     <string name="undo">Отменить</string>
     <string name="clear">Очистить</string>
     <string name="history">История</string>
@@ -59,7 +59,7 @@
     <string name="hint_ruler_second">Переместите прицел и поставьте вторую точку</string>
     <string name="hint_height_first">Поставьте нижнюю точку</string>
     <string name="hint_height_second">Поставьте верхнюю точку</string>
-    <string name="hint_area">Поставьте точку %1$d из %2$d по контуру</string>
+    <string name="hint_area">Поставьте точку %1$s из %2$s по контуру</string>
     <string name="hint_refining">Удерживайте телефон — уточняем результат</string>
     <string name="hint_complete">Готово. Результат стабилизирован и сохранён</string>
 

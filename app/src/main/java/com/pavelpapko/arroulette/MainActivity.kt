@@ -735,8 +735,8 @@ class MainActivity : AppCompatActivity() {
                 complete -> getString(R.string.new_measurement)
                 else -> getString(
                     R.string.area_point_button,
-                    measurementAnchors.size + 1,
-                    AREA_POINT_COUNT
+                    (measurementAnchors.size + 1).toString(),
+                    AREA_POINT_COUNT.toString()
                 )
             }
         }
@@ -775,7 +775,11 @@ class MainActivity : AppCompatActivity() {
             MeasurementMode.AREA -> when {
                 isMeasurementComplete() && latestResultEstimate?.stable == true -> getString(R.string.hint_complete)
                 isMeasurementComplete() -> getString(R.string.hint_refining)
-                else -> getString(R.string.hint_area, measurementAnchors.size + 1, AREA_POINT_COUNT)
+                else -> getString(
+                    R.string.hint_area,
+                    (measurementAnchors.size + 1).toString(),
+                    AREA_POINT_COUNT.toString()
+                )
             }
         }
     }

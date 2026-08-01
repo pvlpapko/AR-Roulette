@@ -23,8 +23,8 @@ android {
         applicationId = "com.pavelpapko.arroulette"
         minSdk = 29
         targetSdk = 36
-        versionCode = 9
-        versionName = "1.2.1"
+        versionCode = 10
+        versionName = "1.2.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
