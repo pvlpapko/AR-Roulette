@@ -2,13 +2,17 @@ package com.pavelpapko.arroulette
 
 import android.Manifest
 import android.content.Intent
+import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.PointF
 import android.net.Uri
 import android.opengl.Matrix
+import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.View
 import android.view.ViewGroup
@@ -26,20 +30,27 @@ import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.core.content.ContextCompat
 import com.google.ar.core.Anchor
 import com.google.ar.core.Camera
+import com.google.ar.core.CameraConfig
+import com.google.ar.core.CameraConfigFilter
 import com.google.ar.core.Config
+import com.google.ar.core.Coordinates2d
+import com.google.ar.core.Coordinates3d
 import com.google.ar.core.DepthPoint
 import com.google.ar.core.Frame
 import com.google.ar.core.HitResult
 import com.google.ar.core.Plane
 import com.google.ar.core.Point
 import com.google.ar.core.Pose
+import com.google.ar.core.Session
 import com.google.ar.core.TrackingFailureReason
 import com.google.ar.core.TrackingState
 import com.google.ar.core.exceptions.NotYetAvailableException
+import io.github.sceneview.RenderQuality
 import io.github.sceneview.ar.ARSceneView
 import java.nio.ByteOrder
 import java.text.DateFormat
 import java.util.Date
+import java.util.EnumSet
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.sqrt
@@ -68,7 +79,29 @@ class MainActivity : AppCompatActivity() {
     private lateinit var modeDistance: TextView
 
     private var arComposeView: ComposeView? = null
+    private var arSession: Session? = null
     private var latestFrame: Frame? = null
+    private var lastFrameProcessingNanos = 0L
+    private var eisEnabled = false
+
+    // Reused projection buffers avoid hundreds of short-lived arrays per minute.
+    private val projectionViewMatrix = FloatArray(16)
+    private val projectionMatrix = FloatArray(16)
+    private val viewProjectionMatrix = FloatArray(16)
+    private val projectionWorldPoint = FloatArray(4)
+    private val projectionClipPoint = FloatArray(4)
+    private val projectionNdcInput = FloatArray(2)
+    private val projectionEisOutput = FloatArray(3)
+
+    private lateinit var powerManager: PowerManager
+    private var thermalStatus = PowerManager.THERMAL_STATUS_NONE
+    private var thermalHeadroom = Float.NaN
+    private var lastThermalHeadroomReadNanos = 0L
+    private var thermalListenerRegistered = false
+    private var thermalPaused = false
+    private val thermalStatusListener = PowerManager.OnThermalStatusChangedListener { status ->
+        handleThermalStatusChanged(status)
+    }
     private val measurementAnchors = mutableListOf<Anchor>()
     private var displayUnit = DisplayUnit.CENTIMETERS
     private var measurementMode = MeasurementMode.RULER
@@ -84,6 +117,13 @@ class MainActivity : AppCompatActivity() {
     private var latestLiveEstimate: ScalarEstimate? = null
 
     private val targetStabilizer = TargetStabilizer()
+    private val motionStabilityGate = MotionStabilityGate()
+    private var latestMotionEstimate = MotionEstimate(
+        translationSpeedMetersPerSecond = 0f,
+        angularSpeedDegreesPerSecond = 0f,
+        stable = false,
+        excessive = false
+    )
     private var resultFilter = createResultFilter(MeasurementMode.RULER)
     private val liveDistanceFilter = RobustScalarFilter(
         absoluteTolerance = 0.008f,
@@ -107,12 +147,98 @@ class MainActivity : AppCompatActivity() {
         measurementStore = MeasurementStore(this)
         bindActions()
         updateControls()
+        initializeThermalMonitoring()
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             initializeArScene()
         } else {
             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
+    }
+
+    private fun initializeThermalMonitoring() {
+        powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        thermalStatus = powerManager.currentThermalStatus
+        powerManager.addThermalStatusListener(mainExecutor, thermalStatusListener)
+        thermalListenerRegistered = true
+        if (thermalStatus >= PowerManager.THERMAL_STATUS_CRITICAL) {
+            thermalPaused = true
+            showThermalStateImmediately()
+        }
+    }
+
+    private fun handleThermalStatusChanged(status: Int) {
+        thermalStatus = status
+        when {
+            status >= PowerManager.THERMAL_STATUS_CRITICAL -> suspendArForHeat()
+            thermalPaused && status <= PowerManager.THERMAL_STATUS_LIGHT -> resumeArAfterCooling()
+            else -> showThermalStateImmediately()
+        }
+    }
+
+    private fun suspendArForHeat() {
+        if (thermalPaused && arComposeView == null) {
+            showThermalStateImmediately()
+            return
+        }
+        thermalPaused = true
+        detachAllAnchors()
+        targetStabilizer.reset()
+        motionStabilityGate.reset()
+        liveDistanceFilter.reset()
+        latestTargetEstimate = emptyTargetEstimate()
+        latestLiveEstimate = null
+        latestSelectedHit = null
+        latestFrame = null
+        arSession = null
+        lastFrameProcessingNanos = 0L
+        lastDepthReading = null
+        lastDepthReadMillis = 0L
+        arComposeView?.disposeComposition()
+        (arComposeView?.parent as? ViewGroup)?.removeView(arComposeView)
+        arComposeView = null
+        clearOverlay()
+        showThermalStateImmediately()
+        toast(getString(R.string.thermal_camera_paused))
+    }
+
+    private fun resumeArAfterCooling() {
+        if (!thermalPaused) return
+        thermalPaused = false
+        lastFrameProcessingNanos = 0L
+        lastThermalHeadroomReadNanos = 0L
+        thermalHeadroom = Float.NaN
+        motionStabilityGate.reset()
+        if (
+            ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            initializeArScene()
+            toast(getString(R.string.thermal_camera_resumed))
+        }
+    }
+
+    private fun showThermalStateImmediately() {
+        if (!::statusText.isInitialized) return
+        val effectiveStatus = effectiveThermalStatus()
+        val message = when {
+            thermalPaused || thermalStatus >= PowerManager.THERMAL_STATUS_CRITICAL ->
+                getString(R.string.thermal_critical)
+            effectiveStatus >= PowerManager.THERMAL_STATUS_SEVERE ->
+                getString(R.string.thermal_severe)
+            effectiveStatus >= PowerManager.THERMAL_STATUS_MODERATE ->
+                getString(R.string.thermal_moderate)
+            else -> return
+        }
+        statusText.text = message
+        val color = if (effectiveStatus >= PowerManager.THERMAL_STATUS_SEVERE) {
+            R.color.danger
+        } else {
+            R.color.warning
+        }
+        qualityDot.backgroundTintList = ColorStateList.valueOf(
+            ContextCompat.getColor(this, color)
+        )
     }
 
     private fun restoreUiState(savedInstanceState: Bundle?) {
@@ -186,7 +312,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun initializeArScene() {
-        if (arComposeView != null || isFinishing || isDestroyed) return
+        if (arComposeView != null || thermalPaused || isFinishing || isDestroyed) return
 
         val composeView = ComposeView(this).apply {
             layoutParams = FrameLayout.LayoutParams(
@@ -198,9 +324,13 @@ class MainActivity : AppCompatActivity() {
                 ARSceneView(
                     modifier = Modifier.fillMaxSize(),
                     planeRenderer = false,
+                    renderQuality = RenderQuality.Performance,
+                    mainLightNode = null,
+                    fillLightNode = null,
+                    sessionCameraConfig = { session -> selectPowerEfficientCameraConfig(session) },
                     sessionConfiguration = { session, config ->
                         config.planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
-                        config.lightEstimationMode = Config.LightEstimationMode.AMBIENT_INTENSITY
+                        config.lightEstimationMode = Config.LightEstimationMode.DISABLED
                         config.instantPlacementMode = Config.InstantPlacementMode.DISABLED
                         depthSupported = session.isDepthModeSupported(Config.DepthMode.AUTOMATIC)
                         config.depthMode = if (depthSupported) {
@@ -208,15 +338,40 @@ class MainActivity : AppCompatActivity() {
                         } else {
                             Config.DepthMode.DISABLED
                         }
+                        eisEnabled = session.isImageStabilizationModeSupported(
+                            Config.ImageStabilizationMode.EIS
+                        )
+                        config.imageStabilizationMode = if (eisEnabled) {
+                            Config.ImageStabilizationMode.EIS
+                        } else {
+                            Config.ImageStabilizationMode.OFF
+                        }
                     },
                     onSessionCreated = { session ->
+                        arSession = session
                         depthSupported = session.isDepthModeSupported(Config.DepthMode.AUTOMATIC)
                     },
-                    onSessionUpdated = { _, frame ->
+                    onSessionPaused = {
+                        latestFrame = null
+                        motionStabilityGate.reset()
+                    },
+                    onSessionUpdated = { session, frame ->
+                        arSession = session
                         latestFrame = frame
-                        updateFrameUi(frame)
+                        if (!thermalPaused) {
+                            val nowNanos = SystemClock.elapsedRealtimeNanos()
+                            refreshThermalHeadroom(nowNanos)
+                            if (
+                                lastFrameProcessingNanos == 0L ||
+                                nowNanos - lastFrameProcessingNanos >= currentProcessingIntervalNanos()
+                            ) {
+                                lastFrameProcessingNanos = nowNanos
+                                updateFrameUi(frame, nowNanos)
+                            }
+                        }
                     },
                     onSessionFailed = { exception ->
+                        arSession = null
                         runOnUiThread {
                             statusText.text = getString(R.string.ar_unavailable)
                             AlertDialog.Builder(this@MainActivity)
@@ -237,11 +392,65 @@ class MainActivity : AppCompatActivity() {
         arContainer.addView(composeView, 0)
     }
 
+    private fun selectPowerEfficientCameraConfig(session: Session): CameraConfig = runCatching {
+        val filter = CameraConfigFilter(session)
+            .setFacingDirection(CameraConfig.FacingDirection.BACK)
+            .setTargetFps(EnumSet.of(CameraConfig.TargetFps.TARGET_FPS_30))
+        val configurations = session.getSupportedCameraConfigs(filter)
+        configurations.minWithOrNull(
+            compareBy<CameraConfig> {
+                abs(
+                    it.textureSize.width.toLong() * it.textureSize.height.toLong() -
+                        TARGET_CAMERA_TEXTURE_PIXELS
+                )
+            }.thenBy {
+                it.imageSize.width.toLong() * it.imageSize.height.toLong()
+            }
+        )
+    }.getOrNull() ?: session.cameraConfig
+
+    private fun refreshThermalHeadroom(nowNanos: Long) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        if (
+            lastThermalHeadroomReadNanos != 0L &&
+            nowNanos - lastThermalHeadroomReadNanos < THERMAL_HEADROOM_READ_INTERVAL_NANOS
+        ) return
+        lastThermalHeadroomReadNanos = nowNanos
+        val headroom = runCatching { powerManager.getThermalHeadroom(0) }.getOrNull()
+        thermalHeadroom = headroom?.takeIf { it.isFinite() && it > 0f } ?: Float.NaN
+    }
+
+    private fun effectiveThermalStatus(): Int {
+        val headroomStatus = when {
+            !thermalHeadroom.isFinite() -> PowerManager.THERMAL_STATUS_NONE
+            thermalHeadroom >= 0.95f -> PowerManager.THERMAL_STATUS_SEVERE
+            thermalHeadroom >= 0.85f -> PowerManager.THERMAL_STATUS_MODERATE
+            thermalHeadroom >= 0.75f -> PowerManager.THERMAL_STATUS_LIGHT
+            else -> PowerManager.THERMAL_STATUS_NONE
+        }
+        return max(thermalStatus, headroomStatus)
+    }
+
+    private fun currentProcessingIntervalNanos(): Long = when {
+        effectiveThermalStatus() >= PowerManager.THERMAL_STATUS_SEVERE -> 400_000_000L
+        effectiveThermalStatus() >= PowerManager.THERMAL_STATUS_MODERATE -> 250_000_000L
+        effectiveThermalStatus() >= PowerManager.THERMAL_STATUS_LIGHT -> 143_000_000L
+        else -> 100_000_000L
+    }
+
     private fun placePoint() {
+        if (thermalPaused) {
+            toast(getString(R.string.thermal_camera_paused))
+            return
+        }
         val frame = latestFrame
         val sceneView = arComposeView
         if (frame == null || sceneView == null || frame.camera.trackingState != TrackingState.TRACKING) {
             toast(getString(R.string.wait_for_tracking))
+            return
+        }
+        if (!latestMotionEstimate.stable) {
+            toast(getString(R.string.anti_shake_wait))
             return
         }
 
@@ -249,8 +458,14 @@ class MainActivity : AppCompatActivity() {
             clearMeasurement()
         }
 
-        val depthReading = readRawDepth(frame)
-        val selectedHit = findBestHit(frame, sceneView.width, sceneView.height, depthReading)
+        val depthReading = readRawDepth(frame, force = true)
+        val selectedHit = findBestHit(
+            frame = frame,
+            width = sceneView.width,
+            height = sceneView.height,
+            depthReading = depthReading,
+            highAccuracy = true
+        )
         if (selectedHit == null) {
             toast(getString(R.string.surface_not_found))
             return
@@ -281,6 +496,9 @@ class MainActivity : AppCompatActivity() {
 
         runCatching {
             if (measurementMode == MeasurementMode.POINT) detachAllAnchors()
+            // Anchor the current validated hit result instead of averaging world-space poses
+            // across frames. ARCore can refine its world origin over time; a trackable anchor keeps
+            // the physical point stable while the numerical world coordinates are adjusted.
             val newAnchor = selectedHit.hit.createAnchor()
             if (isTooCloseToExisting(newAnchor)) {
                 newAnchor.detach()
@@ -291,6 +509,8 @@ class MainActivity : AppCompatActivity() {
             measurementSaved = false
             resetResultFilter()
             targetStabilizer.reset()
+            motionStabilityGate.reset()
+            latestMotionEstimate = emptyMotionEstimate()
             latestTargetEstimate = emptyTargetEstimate()
             liveDistanceFilter.reset()
         }.onFailure {
@@ -308,38 +528,70 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateFrameUi(frame: Frame) {
+        updateFrameUi(frame, SystemClock.elapsedRealtimeNanos())
+    }
+
+    private fun updateFrameUi(frame: Frame, processingTimeNanos: Long) {
         val sceneView = arComposeView ?: return
-        if (sceneView.width <= 0 || sceneView.height <= 0) return
+        if (sceneView.width <= 0 || sceneView.height <= 0 || thermalPaused) return
 
         val camera = frame.camera
-        val selectedHit = if (camera.trackingState == TrackingState.TRACKING) {
+        latestMotionEstimate = if (camera.trackingState == TrackingState.TRACKING) {
+            motionStabilityGate.add(
+                position = camera.pose.translation,
+                rotationQuaternion = camera.pose.rotationQuaternion,
+                timestampNanos = processingTimeNanos
+            )
+        } else {
+            motionStabilityGate.reset()
+            emptyMotionEstimate()
+        }
+
+        val selectedHit = if (
+            camera.trackingState == TrackingState.TRACKING &&
+            !latestMotionEstimate.excessive
+        ) {
             val depthReading = readRawDepth(frame)
             findBestHit(frame, sceneView.width, sceneView.height, depthReading)
         } else {
+            // Skip AR ray casts during fast movement: they cannot produce a reliable point and
+            // only add CPU/GPU pressure while the user is scanning the room.
             null
         }
         latestSelectedHit = selectedHit
 
-        if (selectedHit != null) {
-            targetStabilizer.add(
-                point = selectedHit.hit.hitPose.translation,
-                source = selectedHit.source,
-                depthConfidence = selectedHit.depthConfidence,
-                distanceFromCameraMeters = selectedHit.distanceMeters
-            )
-            latestTargetEstimate = targetStabilizer.estimate(selectedHit.distanceMeters)
-            liveDistanceFilter.add(selectedHit.distanceMeters)
-        } else {
-            targetStabilizer.miss()
-            latestTargetEstimate = emptyTargetEstimate()
-            liveDistanceFilter.reset()
+        when {
+            latestMotionEstimate.excessive -> {
+                targetStabilizer.reset()
+                liveDistanceFilter.reset()
+                latestTargetEstimate = emptyTargetEstimate()
+            }
+            selectedHit != null -> {
+                if (latestMotionEstimate.stable) {
+                    targetStabilizer.add(
+                        point = selectedHit.hit.hitPose.translation,
+                        source = selectedHit.source,
+                        depthConfidence = selectedHit.depthConfidence,
+                        distanceFromCameraMeters = selectedHit.distanceMeters
+                    )
+                    liveDistanceFilter.add(selectedHit.distanceMeters)
+                } else {
+                    targetStabilizer.hold()
+                }
+                latestTargetEstimate = targetStabilizer.estimate(selectedHit.distanceMeters)
+            }
+            else -> {
+                targetStabilizer.miss()
+                latestTargetEstimate = emptyTargetEstimate()
+                liveDistanceFilter.reset()
+            }
         }
         latestLiveEstimate = liveDistanceFilter.estimate()
 
         val projectedPoints = measurementAnchors.mapNotNull { anchor ->
             anchor.takeIf { it.trackingState == TrackingState.TRACKING }
                 ?.pose
-                ?.let { projectToScreen(it, camera, sceneView.width, sceneView.height) }
+                ?.let { projectToScreen(it, frame, camera, sceneView.width, sceneView.height) }
         }
 
         val rawResult = currentMeasurementValue()
@@ -359,7 +611,8 @@ class MainActivity : AppCompatActivity() {
         val formattedValue = formatCurrentValue(displayValue)
         val reticleState = when {
             selectedHit == null -> MeasurementOverlayView.ReticleState.INVALID
-            latestTargetEstimate.stable -> MeasurementOverlayView.ReticleState.STABLE
+            latestMotionEstimate.stable && latestTargetEstimate.stable ->
+                MeasurementOverlayView.ReticleState.STABLE
             else -> MeasurementOverlayView.ReticleState.ACQUIRING
         }
         val closePolygon = measurementMode == MeasurementMode.AREA && isMeasurementComplete()
@@ -374,7 +627,11 @@ class MainActivity : AppCompatActivity() {
                 measurementMode = measurementMode
             )
             resultText.text = when (measurementMode) {
-                MeasurementMode.POINT -> if (measurementAnchors.isNotEmpty()) getString(R.string.point_fixed) else "—"
+                MeasurementMode.POINT -> if (measurementAnchors.isNotEmpty()) {
+                    getString(R.string.point_fixed)
+                } else {
+                    "—"
+                }
                 else -> formattedValue ?: "—"
             }
             liveDistanceText.text = buildLiveDistanceText(camera, selectedHit)
@@ -393,19 +650,31 @@ class MainActivity : AppCompatActivity() {
         frame: Frame,
         width: Int,
         height: Int,
-        depthReading: DepthReading?
+        depthReading: DepthReading?,
+        highAccuracy: Boolean = false
     ): SelectedHit? {
         if (width <= 0 || height <= 0) return null
         val centerX = width / 2f
         val centerY = height / 2f
         val offset = 8f * resources.displayMetrics.density
-        val samplePoints = listOf(
-            ScreenSample(centerX, centerY, 0f),
-            ScreenSample(centerX - offset, centerY, offset),
-            ScreenSample(centerX + offset, centerY, offset),
-            ScreenSample(centerX, centerY - offset, offset),
-            ScreenSample(centerX, centerY + offset, offset)
-        )
+        val centerSample = ScreenSample(centerX, centerY, 0f)
+        val samplePoints = when {
+            effectiveThermalStatus() >= PowerManager.THERMAL_STATUS_MODERATE ->
+                listOf(centerSample)
+            highAccuracy && latestMotionEstimate.stable -> listOf(
+                centerSample,
+                ScreenSample(centerX - offset, centerY, offset),
+                ScreenSample(centerX + offset, centerY, offset),
+                ScreenSample(centerX, centerY - offset, offset),
+                ScreenSample(centerX, centerY + offset, offset)
+            )
+            latestMotionEstimate.stable -> listOf(
+                centerSample,
+                ScreenSample(centerX - offset, centerY, offset),
+                ScreenSample(centerX + offset, centerY, offset)
+            )
+            else -> listOf(centerSample)
+        }
 
         val cameraPose = frame.camera.pose
         val candidates = mutableListOf<HitCandidate>()
@@ -464,11 +733,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun readRawDepth(frame: Frame): DepthReading? {
+    private fun readRawDepth(frame: Frame, force: Boolean = false): DepthReading? {
         if (!depthSupported) return null
         val now = System.currentTimeMillis()
-        if (now - lastDepthReadMillis < DEPTH_READ_INTERVAL_MS) {
-            return lastDepthReading?.takeIf { now - it.capturedAtMillis <= DEPTH_CACHE_LIFETIME_MS }
+        val cached = lastDepthReading?.takeIf {
+            now - it.capturedAtMillis <= DEPTH_CACHE_LIFETIME_MS
+        }
+        if (
+            effectiveThermalStatus() >= PowerManager.THERMAL_STATUS_SEVERE ||
+            !latestMotionEstimate.stable
+        ) {
+            return cached
+        }
+        if (!force && now - lastDepthReadMillis < currentDepthReadIntervalMillis()) {
+            return cached
         }
         lastDepthReadMillis = now
 
@@ -486,6 +764,12 @@ class MainActivity : AppCompatActivity() {
 
         if (reading != null) lastDepthReading = reading
         return reading ?: lastDepthReading?.takeIf { now - it.capturedAtMillis <= DEPTH_CACHE_LIFETIME_MS }
+    }
+
+    private fun currentDepthReadIntervalMillis(): Long = when {
+        effectiveThermalStatus() >= PowerManager.THERMAL_STATUS_MODERATE -> 1_500L
+        effectiveThermalStatus() >= PowerManager.THERMAL_STATUS_LIGHT -> 1_000L
+        else -> 750L
     }
 
     private fun sampleCenterDepth(
@@ -594,10 +878,27 @@ class MainActivity : AppCompatActivity() {
     private fun updateQualityStatus(camera: Camera, selectedHit: SelectedHit?) {
         val status: String
         val color: Int
+        val effectiveThermalStatus = effectiveThermalStatus()
         when {
+            thermalPaused || thermalStatus >= PowerManager.THERMAL_STATUS_CRITICAL -> {
+                status = getString(R.string.thermal_critical)
+                color = ContextCompat.getColor(this, R.color.danger)
+            }
+            effectiveThermalStatus >= PowerManager.THERMAL_STATUS_SEVERE -> {
+                status = getString(R.string.thermal_severe)
+                color = ContextCompat.getColor(this, R.color.danger)
+            }
+            effectiveThermalStatus >= PowerManager.THERMAL_STATUS_MODERATE -> {
+                status = getString(R.string.thermal_moderate)
+                color = ContextCompat.getColor(this, R.color.warning)
+            }
             camera.trackingState != TrackingState.TRACKING -> {
                 status = trackingFailureText(camera.trackingFailureReason)
                 color = ContextCompat.getColor(this, R.color.danger)
+            }
+            !latestMotionEstimate.stable -> {
+                status = getString(R.string.anti_shake_stabilizing)
+                color = ContextCompat.getColor(this, R.color.warning)
             }
             selectedHit == null -> {
                 status = getString(R.string.searching_surface)
@@ -622,6 +923,7 @@ class MainActivity : AppCompatActivity() {
         statusText.contentDescription = buildString {
             append(status)
             append(if (depthSupported) ". Depth API включён" else ". Depth API недоступен")
+            append(if (eisEnabled) ". Стабилизация изображения включена" else ". Стабилизация изображения недоступна")
         }
     }
 
@@ -634,22 +936,58 @@ class MainActivity : AppCompatActivity() {
         TrackingFailureReason.CAMERA_UNAVAILABLE -> getString(R.string.camera_unavailable)
     }
 
-    private fun projectToScreen(pose: Pose, camera: Camera, width: Int, height: Int): PointF? {
+    private fun projectToScreen(
+        pose: Pose,
+        frame: Frame,
+        camera: Camera,
+        width: Int,
+        height: Int
+    ): PointF? {
         if (width <= 0 || height <= 0) return null
-        val viewMatrix = FloatArray(16)
-        val projectionMatrix = FloatArray(16)
-        val viewProjectionMatrix = FloatArray(16)
-        val worldPoint = floatArrayOf(pose.tx(), pose.ty(), pose.tz(), 1f)
-        val clipPoint = FloatArray(4)
+        projectionWorldPoint[0] = pose.tx()
+        projectionWorldPoint[1] = pose.ty()
+        projectionWorldPoint[2] = pose.tz()
+        projectionWorldPoint[3] = 1f
 
-        camera.getViewMatrix(viewMatrix, 0)
+        camera.getViewMatrix(projectionViewMatrix, 0)
         camera.getProjectionMatrix(projectionMatrix, 0, 0.05f, 100f)
-        Matrix.multiplyMM(viewProjectionMatrix, 0, projectionMatrix, 0, viewMatrix, 0)
-        Matrix.multiplyMV(clipPoint, 0, viewProjectionMatrix, 0, worldPoint, 0)
-        if (clipPoint[3] <= 0f) return null
+        Matrix.multiplyMM(
+            viewProjectionMatrix,
+            0,
+            projectionMatrix,
+            0,
+            projectionViewMatrix,
+            0
+        )
+        Matrix.multiplyMV(
+            projectionClipPoint,
+            0,
+            viewProjectionMatrix,
+            0,
+            projectionWorldPoint,
+            0
+        )
+        if (projectionClipPoint[3] <= 0f) return null
 
-        val normalizedX = clipPoint[0] / clipPoint[3]
-        val normalizedY = clipPoint[1] / clipPoint[3]
+        var normalizedX = projectionClipPoint[0] / projectionClipPoint[3]
+        var normalizedY = projectionClipPoint[1] / projectionClipPoint[3]
+        if (eisEnabled) {
+            projectionNdcInput[0] = normalizedX
+            projectionNdcInput[1] = normalizedY
+            try {
+                frame.transformCoordinates3d(
+                    Coordinates2d.OPENGL_NORMALIZED_DEVICE_COORDINATES,
+                    projectionNdcInput,
+                    Coordinates3d.EIS_NORMALIZED_DEVICE_COORDINATES,
+                    projectionEisOutput
+                )
+                normalizedX = projectionEisOutput[0]
+                normalizedY = projectionEisOutput[1]
+            } catch (_: IllegalArgumentException) {
+                // Fall back to standard NDC if a vendor ARCore build rejects EIS coordinates.
+            }
+        }
+
         return PointF(
             (normalizedX + 1f) * 0.5f * width,
             (1f - normalizedY) * 0.5f * height
@@ -664,6 +1002,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun undoLastPoint() {
+        targetStabilizer.reset()
+        liveDistanceFilter.reset()
+        latestTargetEstimate = emptyTargetEstimate()
+        latestLiveEstimate = null
         if (measurementAnchors.isNotEmpty()) {
             val anchor = measurementAnchors.removeAt(measurementAnchors.lastIndex)
             runCatching { anchor.detach() }
@@ -676,6 +1018,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun clearMeasurement() {
         detachAllAnchors()
+        targetStabilizer.reset()
+        liveDistanceFilter.reset()
+        latestTargetEstimate = emptyTargetEstimate()
+        latestLiveEstimate = null
+        latestSelectedHit = null
         measurementSaved = false
         resetResultFilter()
         latestResultEstimate = null
@@ -707,6 +1054,11 @@ class MainActivity : AppCompatActivity() {
     private fun selectMode(mode: MeasurementMode) {
         if (measurementMode == mode) return
         detachAllAnchors()
+        targetStabilizer.reset()
+        liveDistanceFilter.reset()
+        latestTargetEstimate = emptyTargetEstimate()
+        latestLiveEstimate = null
+        latestSelectedHit = null
         measurementMode = mode
         measurementSaved = false
         resultFilter = createResultFilter(mode)
@@ -793,7 +1145,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateActionAvailability() {
         val complete = isMeasurementComplete()
-        val enabled = when {
+        val enabled = !thermalPaused && latestMotionEstimate.stable && when {
             complete && measurementMode != MeasurementMode.DISTANCE_TO_OBJECT -> true
             measurementMode == MeasurementMode.DISTANCE_TO_OBJECT ->
                 latestTargetEstimate.stable && latestLiveEstimate?.stable == true
@@ -959,7 +1311,13 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         detachAllAnchors()
+        if (thermalListenerRegistered) {
+            powerManager.removeThermalStatusListener(thermalStatusListener)
+            thermalListenerRegistered = false
+        }
+        arComposeView?.disposeComposition()
         arComposeView = null
+        arSession = null
         latestFrame = null
         super.onDestroy()
     }
@@ -1000,10 +1358,11 @@ class MainActivity : AppCompatActivity() {
         private const val STATE_MODE = "measurement_mode"
         private const val STATE_GRID = "grid_enabled"
         private const val AREA_POINT_COUNT = 4
-        private const val STATUS_UPDATE_INTERVAL_MS = 150L
-        private const val DEPTH_READ_INTERVAL_MS = 100L
-        private const val DEPTH_CACHE_LIFETIME_MS = 500L
-        private const val DEPTH_SAMPLE_RADIUS = 3
+        private const val STATUS_UPDATE_INTERVAL_MS = 500L
+        private const val DEPTH_CACHE_LIFETIME_MS = 1_500L
+        private const val DEPTH_SAMPLE_RADIUS = 2
+        private const val THERMAL_HEADROOM_READ_INTERVAL_NANOS = 1_000_000_000L
+        private const val TARGET_CAMERA_TEXTURE_PIXELS = 1280L * 720L
         private const val MIN_RAW_DEPTH_SAMPLES = 5
         private const val MIN_RAW_DEPTH_CONFIDENCE = 0.38f
         private const val EXCELLENT_DEPTH_CONFIDENCE = 0.62f
@@ -1019,7 +1378,15 @@ class MainActivity : AppCompatActivity() {
             allowedSpreadMeters = 0f,
             stable = false,
             source = null,
-            depthConfidence = null
+            depthConfidence = null,
+            stabilizedPoint = null
+        )
+
+        private fun emptyMotionEstimate() = MotionEstimate(
+            translationSpeedMetersPerSecond = 0f,
+            angularSpeedDegreesPerSecond = 0f,
+            stable = false,
+            excessive = false
         )
     }
 }

@@ -36,6 +36,14 @@
     <string name="ar_error">ошибка AR</string>
     <string name="point_fixed">Точка</string>
 
+    <string name="anti_shake_wait">Остановите движение и удерживайте телефон ровно — точка зафиксируется автоматически</string>
+    <string name="anti_shake_stabilizing">Антидрожание: удерживайте телефон ровно</string>
+    <string name="thermal_moderate">Телефон нагревается · включён экономичный режим</string>
+    <string name="thermal_severe">Сильный нагрев · обработка и Depth существенно ограничены</string>
+    <string name="thermal_critical">Критический нагрев · AR-камера остановлена до охлаждения</string>
+    <string name="thermal_camera_paused">AR-камера остановлена из-за критического нагрева. Закройте приложение и дайте телефону остыть</string>
+    <string name="thermal_camera_resumed">Телефон остыл. AR-камера снова запущена</string>
+
     <string name="aim_at_surface">Наведите прицел на поверхность</string>
     <string name="source_depth">Depth</string>
     <string name="source_plane">плоскость</string>
