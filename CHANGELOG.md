@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.4 — 2026-08-01
+
+- Исправлена ошибка Android Lint `PermissionImpliesUnsupportedChromeOsHardware`.
+- Явно объявлена обычная камера как необязательная для фильтрации Google Play/ChromeOS (`android.hardware.camera`, `required=false`).
+- AR-камера по-прежнему обязательна через `android.hardware.camera.ar`, поэтому приложение устанавливается только на подходящие ARCore-устройства.
+- Версия приложения повышена до 1.0.4 (`versionCode` 5).
+
 ## 1.0.3 — 2026-08-01
 
 - Исправлена ошибка Android Lint `NewApi` для Android 10–14: `MutableList.removeLast()` заменён на совместимый `removeAt(lastIndex)`.

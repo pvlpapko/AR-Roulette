@@ -4,6 +4,14 @@
 
     <uses-permission android:name="android.permission.CAMERA" />
 
+    <!--
+        CAMERA permission otherwise implies a required rear camera on Google Play/ChromeOS.
+        AR capability is still mandatory through android.hardware.camera.ar below.
+    -->
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+
     <uses-feature
         android:name="android.hardware.camera.ar"
         android:required="true" />
