@@ -42,7 +42,7 @@ class MeasurementOverlayView @JvmOverloads constructor(
         style = Paint.Style.STROKE
     }
     private val labelBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(240, 40, 120, 246)
+        color = 0xF02878F6.toInt()
         style = Paint.Style.FILL
     }
     private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -60,7 +60,7 @@ class MeasurementOverlayView @JvmOverloads constructor(
         style = Paint.Style.FILL
     }
     private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(42, 255, 255, 255)
+        color = 0x2AFFFFFF
         strokeWidth = 1f * density
         style = Paint.Style.STROKE
     }
@@ -126,7 +126,7 @@ class MeasurementOverlayView @JvmOverloads constructor(
         linePaint.color = lineColor
         markerPaint.color = lineColor
         labelBackgroundPaint.color = lineColor
-        polygonPaint.color = Color.argb(45, Color.red(lineColor), Color.green(lineColor), Color.blue(lineColor))
+        polygonPaint.color = withAlpha(lineColor, 45)
 
         if (points.size >= 2) {
             val path = Path().apply {
@@ -158,8 +158,9 @@ class MeasurementOverlayView @JvmOverloads constructor(
         reticleDotPaint.color = color
 
         canvas.drawCircle(centerX, centerY, radius, reticlePaint)
-        canvas.drawCircle(centerX, centerY, outerRadius, reticlePaint.apply { alpha = 115 })
-        reticlePaint.alpha = 255
+        reticlePaint.color = withAlpha(color, 115)
+        canvas.drawCircle(centerX, centerY, outerRadius, reticlePaint)
+        reticlePaint.color = color
         canvas.drawCircle(centerX, centerY, 2.7f * density, reticleDotPaint)
         canvas.drawLine(centerX - radius - arm, centerY, centerX - radius - gap, centerY, reticlePaint)
         canvas.drawLine(centerX + radius + gap, centerY, centerX + radius + arm, centerY, reticlePaint)
@@ -170,9 +171,9 @@ class MeasurementOverlayView @JvmOverloads constructor(
     private fun drawMarker(canvas: Canvas, point: PointF) {
         val outerRadius = 12f * density
         val innerRadius = 6f * density
-        markerStrokePaint.alpha = 105
+        markerStrokePaint.color = withAlpha(Color.WHITE, 105)
         canvas.drawCircle(point.x, point.y, outerRadius, markerStrokePaint)
-        markerStrokePaint.alpha = 255
+        markerStrokePaint.color = Color.WHITE
         canvas.drawCircle(point.x, point.y, innerRadius, markerPaint)
         canvas.drawCircle(point.x, point.y, innerRadius, markerStrokePaint)
     }
@@ -212,6 +213,11 @@ class MeasurementOverlayView @JvmOverloads constructor(
             points.map { it.x }.average().toFloat(),
             points.map { it.y }.average().toFloat()
         )
+    }
+
+    private fun withAlpha(color: Int, alpha: Int): Int {
+        val safeAlpha = alpha.coerceIn(0, 255)
+        return (color and 0x00FFFFFF) or (safeAlpha shl 24)
     }
 
     private fun modeColor(mode: MeasurementMode): Int = when (mode) {
