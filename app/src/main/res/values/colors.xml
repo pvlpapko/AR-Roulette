@@ -1,7 +1,14 @@
 <resources>
-    <color name="black">#FF000000</color>
-    <color name="white">#FFFFFFFF</color>
-    <color name="panel">#D9141820</color>
-    <color name="accent">#FF66E3A4</color>
-    <color name="danger">#FFFF6B6B</color>
+    <color name="black">#000000</color>
+    <color name="white">#FFFFFF</color>
+    <color name="accent">#2878F6</color>
+    <color name="accent_dark">#155FD1</color>
+    <color name="success">#54D86A</color>
+    <color name="warning">#FFB020</color>
+    <color name="danger">#FF453A</color>
+    <color name="panel">#CC17191D</color>
+    <color name="panel_strong">#EA17191D</color>
+    <color name="panel_soft">#B323252A</color>
+    <color name="muted_text">#B8FFFFFF</color>
+    <color name="disabled_text">#66FFFFFF</color>
 </resources>

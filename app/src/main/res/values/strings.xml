@@ -4,11 +4,77 @@
     <string name="camera_permission_message">Камера необходима для определения реальных точек пространства и измерения расстояния.</string>
     <string name="grant_permission">Разрешить</string>
     <string name="close">Закрыть</string>
-    <string name="point_one">Поставить точку 1</string>
-    <string name="point_two">Поставить точку 2</string>
+    <string name="save">Сохранить</string>
+    <string name="set_point">Поставить точку</string>
+    <string name="replace_point">Переставить</string>
+    <string name="point_one">Точка 1</string>
+    <string name="point_two">Точка 2</string>
     <string name="new_measurement">Новое измерение</string>
+    <string name="area_point_button">Точка %1$d из %2$d</string>
     <string name="undo">Отменить</string>
     <string name="clear">Очистить</string>
     <string name="history">История</string>
     <string name="unit">Единицы</string>
+    <string name="grid_on">Сетка
+Вкл</string>
+    <string name="grid_off">Сетка
+Выкл</string>
+    <string name="menu">Меню</string>
+    <string name="take_photo">Сохранить снимок</string>
+    <string name="quality">Качество измерения</string>
+
+    <string name="ar_unavailable">ARCore недоступен</string>
+    <string name="ar_start_failed">Не удалось запустить AR</string>
+    <string name="arcore_check_message">Проверьте поддержку ARCore и наличие Google Play Services for AR.</string>
+    <string name="wait_for_tracking">Подождите, пока камера определит пространство</string>
+    <string name="surface_not_found">Точка не определена. Наведитесь на поверхность и медленно переместите телефон</string>
+    <string name="hold_phone_still">Удерживайте телефон ровно около половины секунды, пока прицел не станет белым</string>
+    <string name="hold_phone_for_distance">Удерживайте телефон неподвижно, пока расстояние не стабилизируется</string>
+    <string name="saved_result">Сохранено: %1$s</string>
+    <string name="points_too_close">Точки расположены слишком близко</string>
+    <string name="anchor_failed">Не удалось закрепить точку: %1$s</string>
+    <string name="ar_error">ошибка AR</string>
+    <string name="point_fixed">Точка</string>
+
+    <string name="aim_at_surface">Наведите прицел на поверхность</string>
+    <string name="source_depth">Depth</string>
+    <string name="source_plane">плоскость</string>
+    <string name="source_feature">характерная точка</string>
+    <string name="live_distance_format">До поверхности: %1$s · %2$s</string>
+    <string name="searching_surface">Ищем поверхность</string>
+    <string name="stabilizing">Удерживайте ровно</string>
+    <string name="excellent_quality">Отличное качество</string>
+    <string name="good_quality">Хорошее качество</string>
+    <string name="move_phone_slowly">Медленно перемещайте телефон</string>
+    <string name="tracking_bad_state">Перезапустите AR-сеанс</string>
+    <string name="more_light_needed">Добавьте освещение</string>
+    <string name="move_phone_slower">Двигайте телефон медленнее</string>
+    <string name="aim_at_textured_surface">Наведитесь на фактурную поверхность</string>
+    <string name="camera_unavailable">Камера занята другим приложением</string>
+
+    <string name="hint_distance">Наведите прицел на объект и удерживайте телефон ровно</string>
+    <string name="hint_point">Выберите опорную точку</string>
+    <string name="hint_point_fixed">Точка закреплена в пространстве</string>
+    <string name="hint_ruler_first">Наведите прицел и поставьте первую точку</string>
+    <string name="hint_ruler_second">Переместите прицел и поставьте вторую точку</string>
+    <string name="hint_height_first">Поставьте нижнюю точку</string>
+    <string name="hint_height_second">Поставьте верхнюю точку</string>
+    <string name="hint_area">Поставьте точку %1$d из %2$d по контуру</string>
+    <string name="hint_refining">Удерживайте телефон — уточняем результат</string>
+    <string name="hint_complete">Готово. Результат стабилизирован и сохранён</string>
+
+    <string name="how_to_measure">Как измерять</string>
+    <string name="clear_current">Очистить текущее измерение</string>
+    <string name="about_app">О приложении</string>
+    <string name="instructions">1. Медленно поводите телефоном, чтобы ARCore распознал пространство.\n\n2. Наведите центральный прицел на нужную точку и удерживайте телефон, пока прицел не станет белым.\n\n3. В режиме «Рулетка» поставьте две точки. Для высоты начинайте снизу. Для площади поставьте четыре точки по контуру по порядку.\n\n4. После последней точки удерживайте телефон неподвижно несколько мгновений: приложение отфильтрует дрожание и сохранит стабильный результат.\n\nЛучшие условия: хорошее освещение, фактурная матовая поверхность и расстояние до 5–8 метров.</string>
+    <string name="understood">Понятно</string>
+    <string name="depth_enabled">Depth API и проверка Raw Depth включены.</string>
+    <string name="depth_fallback">Используются распознанные плоскости и характерные точки.</string>
+    <string name="about_message">Версия %1$s\n\nРеальные измерения через ARCore. %2$s\n\nРезультат не является поверенным измерением и не заменяет профессиональный измерительный прибор.</string>
+    <string name="history_empty">История пока пуста</string>
+    <string name="measurement_history">История измерений</string>
+    <string name="clear_history">Очистить историю</string>
+    <string name="history_cleared">История очищена</string>
+    <string name="photo_saved">Снимок сохранён в Pictures/AR Рулетка: %1$s</string>
+    <string name="photo_failed">Не удалось сохранить снимок</string>
 </resources>

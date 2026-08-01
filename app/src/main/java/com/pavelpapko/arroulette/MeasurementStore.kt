@@ -6,7 +6,8 @@ import org.json.JSONObject
 
 data class MeasurementRecord(
     val timestamp: Long,
-    val meters: Float
+    val value: Float,
+    val kind: MeasurementKind
 )
 
 class MeasurementStore(context: Context) {
@@ -18,9 +19,18 @@ class MeasurementStore(context: Context) {
             val array = JSONArray(raw)
             MutableList(array.length()) { index ->
                 val item = array.getJSONObject(index)
+                val kind = item.optString("kind")
+                    .takeIf { it.isNotBlank() }
+                    ?.let { runCatching { MeasurementKind.valueOf(it) }.getOrNull() }
+                    ?: MeasurementKind.DISTANCE
+                val value = when {
+                    item.has("value") -> item.getDouble("value").toFloat()
+                    else -> item.getDouble("meters").toFloat() // Backward compatibility with 1.0.x.
+                }
                 MeasurementRecord(
                     timestamp = item.getLong("timestamp"),
-                    meters = item.getDouble("meters").toFloat()
+                    value = value,
+                    kind = kind
                 )
             }
         }.getOrElse { mutableListOf() }
@@ -43,7 +53,8 @@ class MeasurementStore(context: Context) {
             array.put(
                 JSONObject()
                     .put("timestamp", record.timestamp)
-                    .put("meters", record.meters.toDouble())
+                    .put("value", record.value.toDouble())
+                    .put("kind", record.kind.name)
             )
         }
         preferences.edit().putString(KEY_HISTORY, array.toString()).apply()
