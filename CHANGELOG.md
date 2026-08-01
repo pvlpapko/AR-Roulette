@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.2 — 2026-08-01
+
+- Исправлен конфликт слияния AndroidManifest между приложением и SceneView: значение `com.google.ar.core=required` теперь явно имеет приоритет через `tools:replace="android:value"`.
+- В workflow GitHub Actions Gradle обновлён с 8.13 до 8.14.4.
+- Версия приложения повышена до 1.0.2 (`versionCode` 3).
+
 ## 1.0.1 — 2026-08-01
 
 - Исправлена сборка с Kotlin 2.3.20: устаревший `android.kotlinOptions.jvmTarget` заменён на `kotlin.compilerOptions`.
